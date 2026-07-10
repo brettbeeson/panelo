@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="2620" height="1370" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .sheet { fill: white; stroke: black; stroke-width: 2; }
+    .panel { fill: lightblue; stroke: darkblue; stroke-width: 1; opacity: 0.8; }
+    .text { font-family: Arial; font-size: 40px; fill: black; }
+    .label { font-family: Arial; font-size: 30px; fill: darkblue; }
+    .dim-line { stroke: #333; stroke-width: 1; fill: none; }
+    .dim-text { font-family: Arial; font-size: 12px; fill: #333; }
+  </style>
+  <!-- Sheet 5 -->
+  <rect x="170" y="120" width="2400" height="1200" class="sheet"/>
+  <text x="170" y="40" class="text">Sheet 5: 2400×1200mm (74.8%)</text>
+  <line x1="170" y1="120" x2="170" y2="98" class="dim-line"/>
+  <line x1="170" y1="62" x2="170" y2="70" class="dim-line"/>
+  <line x1="170" y1="90" x2="170" y2="98" class="dim-line"/>
+  <line x1="2012" y1="120" x2="2012" y2="98" class="dim-line"/>
+  <line x1="2012" y1="62" x2="2012" y2="70" class="dim-line"/>
+  <line x1="2012" y1="90" x2="2012" y2="98" class="dim-line"/>
+  <line x1="2570" y1="120" x2="2570" y2="98" class="dim-line"/>
+  <line x1="2570" y1="62" x2="2570" y2="70" class="dim-line"/>
+  <line x1="2570" y1="90" x2="2570" y2="98" class="dim-line"/>
+  <line x1="170" y1="66" x2="2012" y2="66" class="dim-line"/>
+  <line x1="170" y1="94" x2="2012" y2="94" class="dim-line"/>
+  <text x="1091.0" y="60" text-anchor="middle" class="dim-text">1842</text>
+  <line x1="2012" y1="66" x2="2570" y2="66" class="dim-line"/>
+  <line x1="2012" y1="94" x2="2570" y2="94" class="dim-line"/>
+  <text x="2291.0" y="60" text-anchor="middle" class="dim-text">558</text>
+  <text x="170" y="88" text-anchor="middle" class="dim-text">0</text>
+  <text x="2012" y="88" text-anchor="middle" class="dim-text">1842</text>
+  <text x="2570" y="88" text-anchor="middle" class="dim-text">2400</text>
+  <line x1="170" y1="120" x2="130" y2="120" class="dim-line"/>
+  <line x1="78" y1="120" x2="86" y2="120" class="dim-line"/>
+  <line x1="122" y1="120" x2="130" y2="120" class="dim-line"/>
+  <line x1="170" y1="510" x2="130" y2="510" class="dim-line"/>
+  <line x1="78" y1="510" x2="86" y2="510" class="dim-line"/>
+  <line x1="122" y1="510" x2="130" y2="510" class="dim-line"/>
+  <line x1="170" y1="514" x2="130" y2="514" class="dim-line"/>
+  <line x1="78" y1="514" x2="86" y2="514" class="dim-line"/>
+  <line x1="122" y1="514" x2="130" y2="514" class="dim-line"/>
+  <line x1="170" y1="904" x2="130" y2="904" class="dim-line"/>
+  <line x1="78" y1="904" x2="86" y2="904" class="dim-line"/>
+  <line x1="122" y1="904" x2="130" y2="904" class="dim-line"/>
+  <line x1="170" y1="908" x2="130" y2="908" class="dim-line"/>
+  <line x1="78" y1="908" x2="86" y2="908" class="dim-line"/>
+  <line x1="122" y1="908" x2="130" y2="908" class="dim-line"/>
+  <line x1="170" y1="1298" x2="130" y2="1298" class="dim-line"/>
+  <line x1="78" y1="1298" x2="86" y2="1298" class="dim-line"/>
+  <line x1="122" y1="1298" x2="130" y2="1298" class="dim-line"/>
+  <line x1="170" y1="1320" x2="130" y2="1320" class="dim-line"/>
+  <line x1="78" y1="1320" x2="86" y2="1320" class="dim-line"/>
+  <line x1="122" y1="1320" x2="130" y2="1320" class="dim-line"/>
+  <line x1="82" y1="120" x2="82" y2="510" class="dim-line"/>
+  <line x1="126" y1="120" x2="126" y2="510" class="dim-line"/>
+  <text x="76" y="315.0" text-anchor="middle" class="dim-text" transform="rotate(-90 76 315.0)">390</text>
+  <line x1="82" y1="510" x2="82" y2="514" class="dim-line"/>
+  <line x1="126" y1="510" x2="126" y2="514" class="dim-line"/>
+  <text x="76" y="512.0" text-anchor="middle" class="dim-text" transform="rotate(-90 76 512.0)">4</text>
+  <line x1="82" y1="514" x2="82" y2="904" class="dim-line"/>
+  <line x1="126" y1="514" x2="126" y2="904" class="dim-line"/>
+  <text x="76" y="709.0" text-anchor="middle" class="dim-text" transform="rotate(-90 76 709.0)">390</text>
+  <line x1="82" y1="904" x2="82" y2="908" class="dim-line"/>
+  <line x1="126" y1="904" x2="126" y2="908" class="dim-line"/>
+  <text x="76" y="906.0" text-anchor="middle" class="dim-text" transform="rotate(-90 76 906.0)">4</text>
+  <line x1="82" y1="908" x2="82" y2="1298" class="dim-line"/>
+  <line x1="126" y1="908" x2="126" y2="1298" class="dim-line"/>
+  <text x="76" y="1103.0" text-anchor="middle" class="dim-text" transform="rotate(-90 76 1103.0)">390</text>
+  <line x1="82" y1="1298" x2="82" y2="1320" class="dim-line"/>
+  <line x1="126" y1="1298" x2="126" y2="1320" class="dim-line"/>
+  <text x="76" y="1309.0" text-anchor="middle" class="dim-text" transform="rotate(-90 76 1309.0)">22</text>
+  <text x="120" y="120" text-anchor="middle" class="dim-text" transform="rotate(-90 120 120)">0</text>
+  <text x="120" y="510" text-anchor="middle" class="dim-text" transform="rotate(-90 120 510)">390</text>
+  <text x="110" y="514" text-anchor="middle" class="dim-text" transform="rotate(-90 110 514)">394</text>
+  <text x="120" y="904" text-anchor="middle" class="dim-text" transform="rotate(-90 120 904)">784</text>
+  <text x="110" y="908" text-anchor="middle" class="dim-text" transform="rotate(-90 110 908)">788</text>
+  <text x="120" y="1298" text-anchor="middle" class="dim-text" transform="rotate(-90 120 1298)">1178</text>
+  <text x="110" y="1320" text-anchor="middle" class="dim-text" transform="rotate(-90 110 1320)">1200</text>
+  <rect x="170" y="120" width="1842" height="390" class="panel"/>
+  <text x="1091.0" y="315.0" class="label" text-anchor="middle">Front/Back (390×1842 R)</text>
+  <rect x="170" y="514" width="1842" height="390" class="panel"/>
+  <text x="1091.0" y="709.0" class="label" text-anchor="middle">Front/Back (390×1842 R)</text>
+  <rect x="170" y="908" width="1842" height="390" class="panel"/>
+  <text x="1091.0" y="1103.0" class="label" text-anchor="middle">Front/Back (390×1842 R)</text>
+</svg>
