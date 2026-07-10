@@ -1,0 +1,20 @@
+[Unit]
+Description=Panelo Web
+After=network.target
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_GROUP}
+WorkingDirectory=${WORKDIR}
+Environment=PANELO_HOST=127.0.0.1
+Environment=PANELO_PORT=7070
+Environment=PANELO_BASE_PATH=/panelo
+Environment=PANELO_RUNS_ROOT=${RUNS_ROOT}
+Environment=PANELO_RUN_RETENTION_DAYS=30
+ExecStart=${EXEC_START}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

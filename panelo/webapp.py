@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import csv
+import os
 import re
+import shutil
+import time
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
@@ -17,9 +20,71 @@ from panelo.core import pack_panels
 from panelo.models import Panel
 
 
-RUNS_ROOT = Path("runs")
+def _env_int(name: str, default: int) -> int:
+    """Read an integer env var with a safe default."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_path(name: str, default: str) -> Path:
+    """Read a filesystem path env var with a safe default."""
+    raw = os.getenv(name, "").strip()
+    return Path(raw or default)
+
+
+def _normalize_base_path(value: str) -> str:
+    """Normalize base path for reverse proxy deployment."""
+    raw = (value or "").strip()
+    if not raw or raw == "/":
+        return ""
+    if not raw.startswith("/"):
+        raw = f"/{raw}"
+    return raw.rstrip("/")
+
+
+APP_HOST = os.getenv("PANELO_HOST", "127.0.0.1")
+APP_PORT = _env_int("PANELO_PORT", 7070)
+APP_BASE_PATH = _normalize_base_path(os.getenv("PANELO_BASE_PATH", ""))
+RUNS_ROUTE = f"{APP_BASE_PATH}/runs" if APP_BASE_PATH else "/runs"
+APP_ROUTE = f"{APP_BASE_PATH}/" if APP_BASE_PATH else "/"
+RUNS_ROOT = _env_path("PANELO_RUNS_ROOT", "runs")
+RUN_RETENTION_DAYS = _env_int("PANELO_RUN_RETENTION_DAYS", 30)
+
+
+def _cleanup_old_runs() -> int:
+    """Delete run directories older than configured retention days."""
+    if RUN_RETENTION_DAYS <= 0:
+        return 0
+
+    cutoff_ts = time.time() - (RUN_RETENTION_DAYS * 24 * 60 * 60)
+    deleted = 0
+
+    if not RUNS_ROOT.exists():
+        return 0
+
+    for child in RUNS_ROOT.iterdir():
+        if not child.is_dir():
+            continue
+
+        try:
+            if child.stat().st_mtime < cutoff_ts:
+                shutil.rmtree(child, ignore_errors=True)
+                deleted += 1
+        except OSError:
+            # Ignore transient filesystem errors; cleanup is best-effort.
+            continue
+
+    return deleted
+
+
 RUNS_ROOT.mkdir(parents=True, exist_ok=True)
-app.add_static_files('/runs', str(RUNS_ROOT.resolve()))
+_cleanup_old_runs()
+app.add_static_files(RUNS_ROUTE, str(RUNS_ROOT.resolve()))
 
 
 def _default_input_path() -> Path:
@@ -207,6 +272,7 @@ def _import_csv_bytes_replace(content: bytes) -> List[Dict[str, Any]]:
 def _new_run_dir() -> tuple[str, Path]:
     """Create a new run directory under runs/ and return (run_id, path)."""
     RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_runs()
     run_id = uuid4().hex[:16]
     run_dir = RUNS_ROOT / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -219,19 +285,37 @@ def main_page() -> None:
     state = AppState()
     state.rows = _load_default_rows()
 
+    ui.colors(
+        primary="#2563eb",
+        secondary="#64748b",
+        accent="#0f766e",
+        positive="#16a34a",
+        negative="#dc2626",
+        warning="#d97706",
+        info="#0284c7",
+    )
+
     ui.add_head_html(
         """
         <style>
-          body { background: radial-gradient(circle at 20% 20%, #f8fbff 0%, #eef3ff 45%, #f7f8fa 100%); }
+          body {
+            background: radial-gradient(circle at 20% 20%, #f8fbff 0%, #eef3ff 45%, #f7f8fa 100%);
+          }
+
+          .app-shell .q-card {
+            border-radius: 14px;
+          }
         </style>
         """
     )
 
-    with ui.header(elevated=False).classes("bg-white/80 backdrop-blur px-6 py-3"):
-        ui.label("Panelo Web").classes("text-2xl font-bold text-slate-800")
+    with ui.header(elevated=False).classes("bg-white border-b border-slate-200 px-6 py-3"):
+        with ui.row().classes("w-full max-w-[1600px] mx-auto items-center justify-between"):
+            with ui.column().classes("gap-0"):
+                ui.label("Panelo ").classes("text-2xl md:text-3xl font-bold text-slate-800")
+                ui.label("Cut sheets into panels").classes("text-sm text-slate-600")
 
-    with ui.column().classes("w-full max-w-[1600px] mx-auto p-4 gap-4"):
-        status = ui.label("Ready").classes("text-sm text-slate-600")
+    with ui.column().classes("w-full max-w-[1600px] mx-auto p-4 md:p-6 gap-4 app-shell"):
 
         with ui.row().classes("w-full gap-4 flex-wrap lg:flex-nowrap items-start"):
             with ui.column().classes("w-full lg:w-[430px] shrink-0 gap-4"):
@@ -310,7 +394,7 @@ def main_page() -> None:
                             downloads_container.clear()
                             with downloads_container:
                                 ui.label("No files yet.").classes("text-slate-500")
-                            status.set_text("Reset to one blank row.")
+                            ui.notify("Reset to one blank row.", type="info")
 
                         def import_csv_upload(e) -> None:
                             try:
@@ -318,9 +402,11 @@ def main_page() -> None:
                                 state.rows = _import_csv_bytes_replace(uploaded)
                                 grid.rows = state.rows
                                 grid.update()
-                                status.set_text(f"Imported {len(state.rows)} rows from uploaded CSV")
+                                message = f"Imported {len(state.rows)} rows from uploaded CSV"
+                                ui.notify(message, type="positive")
                             except Exception as exc:
-                                status.set_text(f"Import error: {exc}")
+                                message = f"Import error: {exc}"
+                                ui.notify(message, type="negative", multi_line=True)
 
                         csv_uploader = ui.upload(
                             on_upload=import_csv_upload,
@@ -332,10 +418,13 @@ def main_page() -> None:
                                 f'document.querySelector("#c{csv_uploader.id} input[type=file]").click()'
                             )
 
-                        ui.button("Add Row", on_click=add_row)
-                        ui.button("Remove Last Row", on_click=remove_last_row).props("color=warning")
-                        ui.button("Reset", on_click=clear_reset).props("color=secondary")
-                        ui.button("Upload CSV", on_click=open_csv_picker).props("color=secondary")
+                        ui.button("Add Row", on_click=add_row).props("color=primary")
+                        ui.button("Remove Row", on_click=remove_last_row).props("color=warning")
+                        ui.button("Reset", on_click=clear_reset).props("color=warning")
+                        ui.button("CSV", on_click=open_csv_picker).props("color=secondary")
+
+                with ui.row().classes("w-full"):
+                    run_button = ui.button("Let's Cut!").props("color=primary size=lg")
 
                 with ui.card().classes("w-full"):
                     ui.label("Notes").classes("text-lg font-semibold")
@@ -346,9 +435,7 @@ def main_page() -> None:
                     ).classes("w-full")
                     notes_input.props("rows=5")
 
-                with ui.row().classes("w-full"):
-                    run_button = ui.button("Run").props("color=primary size=lg")
-
+                
             with ui.column().classes("w-full flex-1 min-w-[360px] gap-4"):
                 with ui.tabs().classes("w-full") as tabs:
                     summary_tab = ui.tab("Cut List")
@@ -539,22 +626,35 @@ def main_page() -> None:
                         for file_path in pdf_paths + other_paths:
                             p = Path(file_path)
                             is_pdf = p.suffix.lower() == ".pdf"
-                            file_url = f"/runs/{state.current_run_id}/{p.name}"
+                            file_url = f"{RUNS_ROUTE}/{state.current_run_id}/{p.name}"
                             row_classes = "w-full items-center justify-between gap-3 py-1.5 border-b border-slate-200"
                             if is_pdf:
                                 row_classes += " bg-slate-50"
                             with ui.row().classes(row_classes):
                                 link_classes = "text-sm break-all " + ("font-bold text-slate-900" if is_pdf else "text-slate-600")
                                 ui.link(p.name, file_url, new_tab=True).classes(link_classes)
-                status.set_text(f"Done. Wrote {len(state.last_file_paths)} files.")
+                message = f"Done. Wrote {len(state.last_file_paths)} files."
+                ui.notify(message, type="positive")
             except Exception as exc:
-                status.set_text(f"Run error: {exc}")
+                message = f"Run error: {exc}"
+                ui.notify(message, type="negative", multi_line=True)
 
         run_button.on_click(run_pipeline)
 
+
+if APP_BASE_PATH and APP_ROUTE != "/":
+    ui.page(APP_ROUTE)(main_page)
+
+
 def run() -> None:
     """Run the NiceGUI app server."""
-    ui.run(title="Panelo Web", reload=False, show=False, host="127.0.0.1", port=7070)
+    ui.run(
+        title="Panelo Web",
+        reload=False,
+        show=False,
+        host=APP_HOST,
+        port=APP_PORT,
+    )
 
 
 if __name__ in {"__main__", "__mp_main__"}:
