@@ -398,10 +398,10 @@ def to_svg(
 
             label_x = px + panel_w / 2
             label_y = py + panel_h / 2
-            rot_text = " R" if panel.rotated else ""
+            # rot_text = " R" if panel.rotated else ""
             panel_label = panel.label if getattr(panel, "label", "") else f"Panel {panel_num}"
             svg_parts.append(
-                f'  <text x="{label_x}" y="{label_y}" class="label" text-anchor="middle">{panel_label} ({_mm(panel.width)}×{_mm(panel.height)}{rot_text})</text>'
+                f'  <text x="{label_x}" y="{label_y}" class="label" text-anchor="middle">{panel_label} ({_mm(panel.width)}×{_mm(panel.height)})</text>'
             )
 
         svg_parts.append('</svg>')
