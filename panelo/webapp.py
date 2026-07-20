@@ -1,6 +1,6 @@
 """Local NiceGUI web app for panelo."""
 
-from __future__ import annotations
+from collections import defaultdict
 
 import csv
 import json
@@ -19,6 +19,20 @@ from nicegui import app, ui
 from panelo import output as output_formatters
 from panelo.core import pack_panels
 from panelo.models import Panel
+
+_last_submit: dict[str, float] = defaultdict(float)
+SUBMIT_COOLDOWN = 30
+
+
+def can_submit(client_id: str) -> bool:
+    now = time.monotonic()
+
+    if now - _last_submit[client_id] < SUBMIT_COOLDOWN:
+        return False
+
+    _last_submit[client_id] = now
+    return True
+
 
 
 def _env_int(name: str, default: int) -> int:
@@ -867,6 +881,12 @@ def main_page() -> None:
         ui.timer(0.1, _initialize_projects, once=True)
 
         async def run_pipeline() -> None:
+            client_id = ui.context.client.id
+
+            if not can_submit(client_id):
+                ui.notify('Please wait before submitting again.', type='warning')
+                return
+            # Add depl
             try:
                 # Pull latest editable grid rows from browser state.
                 live_rows = await grid.get_client_data(timeout=2)
