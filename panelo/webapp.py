@@ -21,7 +21,7 @@ from panelo.core import pack_panels
 from panelo.models import Panel
 
 _last_submit: dict[str, float] = defaultdict(float)
-SUBMIT_COOLDOWN = 30
+SUBMIT_COOLDOWN = 15
 
 
 def can_submit(client_id: str) -> bool:
