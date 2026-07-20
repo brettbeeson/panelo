@@ -472,12 +472,12 @@ def to_pdf(
 
     # ------------------------------------------------------------------ page 1
     info_rows_data: List[List[str]] = []
-    if panels_file:
-        info_rows_data.append(["CSV", panels_file])
+    # if panels_file:
+    #     info_rows_data.append(["CSV", panels_file])
     if sheet_width is not None and sheet_height is not None:
         info_rows_data.append(["Sheet Size", f"{_mm(sheet_width)} × {_mm(sheet_height)} mm"])
-    if algorithm is not None:
-        info_rows_data.append(["Algorithm", algorithm])
+    # if algorithm is not None:
+    #     info_rows_data.append(["Algorithm", algorithm])
     if kerf is not None:
         info_rows_data.append(["Kerf", f"{kerf:g} mm"])
     info_rows_data.append(["Total Sheets", str(len(sheets))])
@@ -503,7 +503,7 @@ def to_pdf(
             for (label, w, h), qty in sorted(grouped.items())
         ]
         demand_html = (
-            "<h2>Input Panel Demand</h2>"
+            "<h2>Cut Panels Summary</h2>"
             "<table><thead><tr><th>Qty</th><th>Label</th><th>Size</th></tr></thead><tbody>"
             + _trows(demand_rows_data)
             + "</tbody></table>"
@@ -517,7 +517,7 @@ def to_pdf(
         for pn, panel in enumerate(sheet.panels, 1)
     ]
     cut_html = (
-        "<h2>Cut List</h2>"
+        "<h2>Cut Panels</h2>"
         "<table><thead><tr><th>Sheet</th><th>#</th><th>Label</th><th>Size (mm)</th><th>Position</th></tr></thead><tbody>"
         + _trows(cut_rows_data)
         + "</tbody></table>"
