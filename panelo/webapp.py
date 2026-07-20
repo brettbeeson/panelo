@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
 import shutil
@@ -10,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from nicegui import app, ui
@@ -54,6 +55,8 @@ RUNS_ROUTE = f"{APP_BASE_PATH}/runs" if APP_BASE_PATH else "/runs"
 APP_ROUTE = f"{APP_BASE_PATH}/" if APP_BASE_PATH else "/"
 RUNS_ROOT = _env_path("PANELO_RUNS_ROOT", "runs")
 RUN_RETENTION_DAYS = _env_int("PANELO_RUN_RETENTION_DAYS", 30)
+LOCAL_PROJECTS_STORAGE_KEY = "panelo.projects.v1"
+LOCAL_PROJECTS_MAX = 20
 
 
 def _cleanup_old_runs() -> int:
@@ -155,6 +158,9 @@ class AppState:
     svg_dimension_font_size: int = 16
     notes: str = ""
     current_run_id: str = ""
+    current_project_id: str = ""
+    current_project_name: str = "Untitled Project"
+    latest_run_summary: Dict[str, Any] = field(default_factory=dict)
 
     # latest run outputs
     last_error: str = ""
@@ -285,6 +291,42 @@ def main_page() -> None:
     state = AppState()
     state.rows = _load_default_rows()
 
+    def _empty_project_store() -> Dict[str, Any]:
+        return {"version": 1, "currentProjectId": "", "projects": []}
+
+    async def _read_project_store() -> Dict[str, Any]:
+        script = (
+            "(() => {"
+            "try { return localStorage.getItem(" + json.dumps(LOCAL_PROJECTS_STORAGE_KEY) + ") || ''; }"
+            "catch (e) { return ''; }"
+            "})()"
+        )
+        raw = await ui.run_javascript(script)
+        if not raw:
+            return _empty_project_store()
+        try:
+            store = json.loads(raw)
+        except (TypeError, ValueError):
+            return _empty_project_store()
+        if not isinstance(store, dict):
+            return _empty_project_store()
+        if not isinstance(store.get("projects"), list):
+            store["projects"] = []
+        if not isinstance(store.get("currentProjectId"), str):
+            store["currentProjectId"] = ""
+        store["version"] = 1
+        return store
+
+    async def _write_project_store(store: Dict[str, Any]) -> None:
+        payload = json.dumps(store, separators=(",", ":"))
+        script = (
+            "(() => {"
+            "try { localStorage.setItem(" + json.dumps(LOCAL_PROJECTS_STORAGE_KEY) + ", " + json.dumps(payload) + "); }"
+            "catch (e) {}"
+            "})()"
+        )
+        await ui.run_javascript(script)
+
     ui.colors(
         primary="#2563eb",
         secondary="#64748b",
@@ -319,6 +361,14 @@ def main_page() -> None:
 
         with ui.row().classes("w-full gap-4 flex-wrap lg:flex-nowrap items-start"):
             with ui.column().classes("w-full lg:w-[430px] shrink-0 gap-4"):
+                with ui.card().classes("w-full"):
+                    ui.label("Project").classes("text-lg font-semibold")
+                    project_name_input = ui.input("Project Name", value=state.current_project_name).classes("w-full")
+                    project_select = ui.select(options={}, label="Saved Projects").classes("w-full")
+                    with ui.row().classes("w-full gap-2"):
+                        new_project_button = ui.button("New Project").props("color=secondary")
+                        delete_project_button = ui.button("Delete Project").props("color=warning")
+
                 with ui.card().classes("w-full"):
                     ui.label("Stock Sheets").classes("text-lg font-semibold")
                     with ui.row().classes("w-full gap-3"):
@@ -370,6 +420,7 @@ def main_page() -> None:
                             state.rows = await _load_live_rows()
                             state.rows.append({"width": 600, "length": 400, "qty": 1, "label": ""})
                             _refresh_input_grid()
+                            await _save_current_project()
 
                         async def remove_last_row() -> None:
                             state.rows = await _load_live_rows()
@@ -378,6 +429,7 @@ def main_page() -> None:
                             if not state.rows:
                                 state.rows = [{"width": 600, "length": 400, "qty": 1, "label": ""}]
                             _refresh_input_grid()
+                            await _save_current_project()
 
                         async def clear_reset() -> None:
                             state.rows = [{"width": "", "length": "", "qty": "", "label": ""}]
@@ -385,6 +437,7 @@ def main_page() -> None:
                             state.notes = ""
                             notes_input.set_value("")
                             state.current_run_id = ""
+                            state.latest_run_summary = {}
                             summary_box.set_content("No runs yet.")
                             cut_grid.options["rowData"] = []
                             cut_grid.update()
@@ -394,14 +447,16 @@ def main_page() -> None:
                             downloads_container.clear()
                             with downloads_container:
                                 ui.label("No files yet.").classes("text-slate-500")
+                            await _save_current_project()
                             ui.notify("Reset to one blank row.", type="info")
 
-                        def import_csv_upload(e) -> None:
+                        async def import_csv_upload(e) -> None:
                             try:
                                 uploaded = e.content.read()
                                 state.rows = _import_csv_bytes_replace(uploaded)
                                 grid.rows = state.rows
                                 grid.update()
+                                await _save_current_project()
                                 message = f"Imported {len(state.rows)} rows from uploaded CSV"
                                 ui.notify(message, type="positive")
                             except Exception as exc:
@@ -468,6 +523,348 @@ def main_page() -> None:
                         downloads_container = ui.column().classes("w-full gap-2")
                         with downloads_container:
                             ui.label("No files yet.").classes("text-slate-500")
+
+        def _project_options(store: Dict[str, Any]) -> Dict[str, str]:
+            options: Dict[str, str] = {}
+            for project in store.get("projects", []):
+                project_id = str(project.get("id", "")).strip()
+                if not project_id:
+                    continue
+                options[project_id] = str(project.get("name", "Untitled Project")).strip() or "Untitled Project"
+            return options
+
+        async def _get_normalized_rows() -> List[Dict[str, Any]]:
+            live_rows = await grid.get_client_data(timeout=2)
+            if not live_rows:
+                live_rows = state.rows
+            return [_parse_row(r, i) for i, r in enumerate(live_rows, start=1)]
+
+        def _apply_project_to_controls(project: Dict[str, Any]) -> None:
+            inputs = project.get("inputs", {})
+            state.current_project_id = project["id"]
+            state.current_project_name = project["name"]
+            state.rows = list(inputs.get("rows", state.rows))
+            state.sheet_width = int(inputs.get("sheet_width", state.sheet_width))
+            state.sheet_height = int(inputs.get("sheet_height", state.sheet_height))
+            state.kerf = float(inputs.get("kerf", state.kerf))
+            state.algorithm = str(inputs.get("algorithm", state.algorithm))
+            state.svg_title_font_size = int(inputs.get("svg_title_font_size", state.svg_title_font_size))
+            state.svg_label_font_size = int(inputs.get("svg_label_font_size", state.svg_label_font_size))
+            state.svg_dimension_font_size = int(inputs.get("svg_dimension_font_size", state.svg_dimension_font_size))
+            state.notes = str(inputs.get("notes", state.notes))
+            state.latest_run_summary = dict(project.get("latest_run", {}))
+
+            project_name_input.set_value(state.current_project_name)
+            sheet_width_input.set_value(state.sheet_width)
+            sheet_height_input.set_value(state.sheet_height)
+            kerf_input.set_value(state.kerf)
+            algo_select.set_value(state.algorithm)
+            svg_title_font_input.set_value(state.svg_title_font_size)
+            svg_label_font_input.set_value(state.svg_label_font_size)
+            svg_dimension_font_input.set_value(state.svg_dimension_font_size)
+            notes_input.set_value(state.notes)
+            grid.options["rowData"] = state.rows
+            grid.update()
+
+            latest = state.latest_run_summary
+            if latest:
+                summary_box.set_content(
+                    "\n".join(
+                        [
+                            "**Last Saved Run**",
+                            f"- Run ID: {latest.get('run_id', '-')}",
+                            f"- Panels expanded: {latest.get('panels_expanded', '-')}",
+                            f"- Sheets: {latest.get('sheet_count', '-')}",
+                            f"- Utilization avg: {latest.get('avg_utilization_percent', '-')}",
+                        ]
+                    )
+                )
+            else:
+                summary_box.set_content("No runs yet.")
+
+        async def _load_saved_run_for_current_project() -> None:
+            latest = state.latest_run_summary or {}
+            run_id = str(latest.get("run_id", "")).strip()
+            if not run_id:
+                state.current_run_id = ""
+                state.last_file_paths = []
+                cut_grid.options["rowData"] = []
+                cut_grid.update()
+                layouts_container.clear()
+                with layouts_container:
+                    ui.label("No layout yet.").classes("text-slate-500")
+                downloads_container.clear()
+                with downloads_container:
+                    ui.label("No files yet.").classes("text-slate-500")
+                return
+
+            run_dir = RUNS_ROOT / run_id
+            state.current_run_id = run_id
+
+            generated_files = latest.get("generated_files", [])
+            candidate_files: List[Path] = []
+            if isinstance(generated_files, list) and generated_files:
+                for filename in generated_files:
+                    path = run_dir / str(filename)
+                    if path.exists():
+                        candidate_files.append(path)
+
+            if not candidate_files and run_dir.exists():
+                fallback_patterns = ["plan.txt", "plan.csv", "plan.json", "plan.ascii.txt", "plan.pdf", "plan.svg", "plan_sheet*.svg"]
+                for pattern in fallback_patterns:
+                    candidate_files.extend(sorted(run_dir.glob(pattern)))
+
+            state.last_file_paths = [str(path) for path in candidate_files]
+
+            json_path = run_dir / "plan.json"
+            cut_rows: List[Dict[str, Any]] = []
+            if json_path.exists():
+                try:
+                    data = json.loads(json_path.read_text(encoding="utf-8"))
+                    for sheet in data.get("sheets", []):
+                        sheet_num = sheet.get("sheet_number", "-")
+                        for panel in sheet.get("panels", []):
+                            cut_rows.append(
+                                {
+                                    "sheet": sheet_num,
+                                    "panel_number": panel.get("panel_number", "-"),
+                                    "label": "-",
+                                    "size": f"{panel.get('width', '-')} x {panel.get('height', '-')}",
+                                    "position": f"({panel.get('x', '-')}, {panel.get('y', '-')})",
+                                }
+                            )
+                except Exception:
+                    cut_rows = []
+
+            cut_grid.options["rowData"] = cut_rows
+            cut_grid.update()
+
+            layouts_container.clear()
+            svg_sheet_paths = sorted(run_dir.glob("plan_sheet*.svg"))
+            if svg_sheet_paths:
+                for i, svg_file in enumerate(svg_sheet_paths, start=1):
+                    with layouts_container:
+                        ui.label(f"Sheet {i}").classes("font-semibold text-slate-700")
+                        ui.html(_svg_for_web(svg_file.read_text(encoding="utf-8"))).classes("w-full")
+            else:
+                svg_path = run_dir / "plan.svg"
+                if svg_path.exists():
+                    with layouts_container:
+                        ui.html(_svg_for_web(svg_path.read_text(encoding="utf-8"))).classes("w-full")
+                else:
+                    with layouts_container:
+                        ui.label("No layout file found for this project run.").classes("text-slate-500")
+
+            downloads_container.clear()
+            with downloads_container:
+                ui.label("Downloads").classes("text-lg font-semibold text-slate-700")
+                ui.label("View opens in new tab. Right-click there to save directly.").classes("text-xs text-slate-500")
+
+                if not state.last_file_paths:
+                    ui.label("No files found for this saved run.").classes("text-slate-500")
+                else:
+                    with ui.column().classes("w-full gap-0"):
+                        pdf_paths = [fp for fp in state.last_file_paths if fp.endswith(".pdf")]
+                        other_paths = [fp for fp in state.last_file_paths if not fp.endswith(".pdf")]
+                        for file_path in pdf_paths + other_paths:
+                            p = Path(file_path)
+                            is_pdf = p.suffix.lower() == ".pdf"
+                            file_url = f"{RUNS_ROUTE}/{state.current_run_id}/{p.name}"
+                            row_classes = "w-full items-center justify-between gap-3 py-1.5 border-b border-slate-200"
+                            if is_pdf:
+                                row_classes += " bg-slate-50"
+                            with ui.row().classes(row_classes):
+                                link_classes = "text-sm break-all " + ("font-bold text-slate-900" if is_pdf else "text-slate-600")
+                                ui.link(p.name, file_url, new_tab=True).classes(link_classes)
+
+            if run_dir.exists():
+                summary_box.set_content(
+                    "\n".join(
+                        [
+                            "**Loaded Saved Run**",
+                            f"- Run ID: {run_id}",
+                            f"- Panels expanded: {latest.get('panels_expanded', '-')}",
+                            f"- Sheets: {latest.get('sheet_count', '-')}",
+                            f"- Utilization avg: {latest.get('avg_utilization_percent', '-')}",
+                        ]
+                    )
+                )
+            else:
+                summary_box.set_content(
+                    "\n".join(
+                        [
+                            "**Saved Run Not Found**",
+                            f"- Run ID: {run_id}",
+                            "- Files may have been cleaned up from server storage.",
+                        ]
+                    )
+                )
+
+        async def _save_current_project(latest_run: Optional[Dict[str, Any]] = None) -> None:
+            try:
+                rows = await _get_normalized_rows()
+            except Exception:
+                rows = state.rows
+
+            state.rows = [
+                {
+                    "width": int(round(float(r["width"]))),
+                    "length": int(round(float(r["length"]))),
+                    "qty": int(r["qty"]),
+                    "label": str(r.get("label", "")),
+                }
+                for r in rows
+            ]
+            state.sheet_width = int(sheet_width_input.value)
+            state.sheet_height = int(sheet_height_input.value)
+            state.kerf = float(kerf_input.value)
+            state.algorithm = str(algo_select.value)
+            state.svg_title_font_size = int(svg_title_font_input.value)
+            state.svg_label_font_size = int(svg_label_font_input.value)
+            state.svg_dimension_font_size = int(svg_dimension_font_input.value)
+            state.notes = str(notes_input.value or "").strip()
+            state.current_project_name = str(project_name_input.value or "Untitled Project").strip() or "Untitled Project"
+
+            if latest_run is not None:
+                state.latest_run_summary = dict(latest_run)
+
+            store = await _read_project_store()
+            projects = list(store.get("projects", []))
+            now_ts = int(time.time())
+            project_id = state.current_project_id or uuid4().hex[:12]
+            project = {
+                "id": project_id,
+                "name": state.current_project_name,
+                "updated_at": now_ts,
+                "inputs": {
+                    "rows": state.rows,
+                    "sheet_width": state.sheet_width,
+                    "sheet_height": state.sheet_height,
+                    "kerf": state.kerf,
+                    "algorithm": state.algorithm,
+                    "svg_title_font_size": state.svg_title_font_size,
+                    "svg_label_font_size": state.svg_label_font_size,
+                    "svg_dimension_font_size": state.svg_dimension_font_size,
+                    "notes": state.notes,
+                },
+                "latest_run": state.latest_run_summary,
+            }
+
+            projects = [p for p in projects if str(p.get("id", "")) != project_id]
+            projects.append(project)
+            projects.sort(key=lambda p: int(p.get("updated_at", 0)), reverse=True)
+            projects = projects[:LOCAL_PROJECTS_MAX]
+
+            store["projects"] = projects
+            store["currentProjectId"] = project_id
+            await _write_project_store(store)
+
+            state.current_project_id = project_id
+            project_select.options = _project_options(store)
+            project_select.set_value(project_id)
+
+        async def _new_project() -> None:
+            state.current_project_id = ""
+            state.current_project_name = "Untitled Project"
+            state.rows = _load_default_rows()
+            state.sheet_width = 2400
+            state.sheet_height = 1200
+            state.kerf = 4.0
+            state.algorithm = "guillotine"
+            state.svg_title_font_size = 40
+            state.svg_label_font_size = 30
+            state.svg_dimension_font_size = 16
+            state.notes = ""
+            state.latest_run_summary = {}
+
+            project_name_input.set_value(state.current_project_name)
+            sheet_width_input.set_value(state.sheet_width)
+            sheet_height_input.set_value(state.sheet_height)
+            kerf_input.set_value(state.kerf)
+            algo_select.set_value(state.algorithm)
+            svg_title_font_input.set_value(state.svg_title_font_size)
+            svg_label_font_input.set_value(state.svg_label_font_size)
+            svg_dimension_font_input.set_value(state.svg_dimension_font_size)
+            notes_input.set_value("")
+            grid.options["rowData"] = state.rows
+            grid.update()
+            summary_box.set_content("No runs yet.")
+            await _save_current_project()
+            ui.notify("Created new local project", type="positive")
+
+        async def _delete_project() -> None:
+            if not state.current_project_id:
+                return
+            store = await _read_project_store()
+            projects = [
+                p for p in store.get("projects", [])
+                if str(p.get("id", "")) != state.current_project_id
+            ]
+            store["projects"] = projects
+
+            if projects:
+                projects.sort(key=lambda p: int(p.get("updated_at", 0)), reverse=True)
+                selected = projects[0]
+                store["currentProjectId"] = selected["id"]
+                await _write_project_store(store)
+                _apply_project_to_controls(selected)
+                project_select.options = _project_options(store)
+                project_select.set_value(selected["id"])
+            else:
+                store["currentProjectId"] = ""
+                await _write_project_store(store)
+                await _new_project()
+            ui.notify("Deleted local project", type="info")
+
+        async def _switch_project() -> None:
+            selected_id = str(project_select.value or "").strip()
+            if not selected_id:
+                return
+            store = await _read_project_store()
+            project = next((p for p in store.get("projects", []) if str(p.get("id", "")) == selected_id), None)
+            if not project:
+                return
+            _apply_project_to_controls(project)
+            store["currentProjectId"] = selected_id
+            await _write_project_store(store)
+            await _load_saved_run_for_current_project()
+            ui.notify(f"Loaded project: {state.current_project_name}", type="positive")
+
+        async def _initialize_projects() -> None:
+            store = await _read_project_store()
+            projects = list(store.get("projects", []))
+
+            if not projects:
+                await _new_project()
+                return
+
+            project_select.options = _project_options(store)
+            selected_id = str(store.get("currentProjectId", "")).strip()
+            project = next((p for p in projects if str(p.get("id", "")) == selected_id), None)
+            if not project:
+                projects.sort(key=lambda p: int(p.get("updated_at", 0)), reverse=True)
+                project = projects[0]
+            _apply_project_to_controls(project)
+            project_select.set_value(project["id"])
+            await _load_saved_run_for_current_project()
+
+        async def _autosave_from_controls() -> None:
+            await _save_current_project()
+
+        new_project_button.on_click(_new_project)
+        delete_project_button.on_click(_delete_project)
+        project_select.on_value_change(_switch_project)
+        project_name_input.on_value_change(_autosave_from_controls)
+        sheet_width_input.on_value_change(_autosave_from_controls)
+        sheet_height_input.on_value_change(_autosave_from_controls)
+        kerf_input.on_value_change(_autosave_from_controls)
+        algo_select.on_value_change(_autosave_from_controls)
+        svg_title_font_input.on_value_change(_autosave_from_controls)
+        svg_label_font_input.on_value_change(_autosave_from_controls)
+        svg_dimension_font_input.on_value_change(_autosave_from_controls)
+        notes_input.on_value_change(_autosave_from_controls)
+
+        ui.timer(0.1, _initialize_projects, once=True)
 
         async def run_pipeline() -> None:
             try:
@@ -573,6 +970,17 @@ def main_page() -> None:
                 state.json_output = json_output
                 state.ascii_output = ascii_output
                 state.svg_preview = svg_preview
+                state.latest_run_summary = {
+                    "run_id": state.current_run_id,
+                    "panels_expanded": len(panels),
+                    "sheet_count": len(sheets),
+                    "avg_utilization_percent": round(
+                        (sum(sheet.get_utilization() for sheet in sheets) / len(sheets)) if sheets else 0.0,
+                        2,
+                    ),
+                    "generated_files": [Path(p).name for p in generated],
+                    "saved_at": int(time.time()),
+                }
 
                 cut_rows = []
                 for sheet_index, sheet in enumerate(sheets, start=1):
@@ -590,7 +998,7 @@ def main_page() -> None:
                 summary_box.set_content(
                     "\n".join(
                         [
-                            f"**Run Complete**",
+                            "**Run Complete**",
                             f"- Run ID: {state.current_run_id}",
                             f"- Rows: {len(state.rows)}",
                             f"- Panels expanded: {len(panels)}",
@@ -599,6 +1007,8 @@ def main_page() -> None:
                         ]
                     )
                 )
+
+                await _save_current_project(latest_run=state.latest_run_summary)
 
                 cut_grid.options["rowData"] = cut_rows
                 cut_grid.update()

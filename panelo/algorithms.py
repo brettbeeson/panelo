@@ -114,10 +114,11 @@ class GuillotineAlgorithm(Packer):
         best_area_diff = float('inf')
         
         for i, (x, y, w, h) in enumerate(rects):
-            normal_w = panel.width + kerf
-            normal_h = panel.height + kerf
-            rotated_w = panel.height + kerf
-            rotated_h = panel.width + kerf
+            # Kerf is consumed by split cuts, not by panel outer dimensions.
+            normal_w = panel.width
+            normal_h = panel.height
+            rotated_w = panel.height
+            rotated_h = panel.width
 
             # Try normal orientation
             if normal_w <= w and normal_h <= h:
@@ -152,20 +153,59 @@ class GuillotineAlgorithm(Packer):
             panel: Panel that was placed
         """
         x, y, w, h = rects[rect_idx]
-        panel_w = (panel.height if panel.rotated else panel.width) + kerf
-        panel_h = (panel.width if panel.rotated else panel.height) + kerf
+        panel_w = panel.height if panel.rotated else panel.width
+        panel_h = panel.width if panel.rotated else panel.height
         
         # Remove the used rectangle
         rects.pop(rect_idx)
-        
-        # Create new free rectangles using guillotine cuts
-        # Right rectangle
+
+        # Evaluate both valid guillotine split orders and keep the one that
+        # preserves the largest remaining rectangle area.
+        split_vertical_first = []
         if panel_w < w:
-            rects.append((x + panel_w, y, w - panel_w, h))
-        
-        # Top rectangle
+            right_w = w - panel_w - kerf
+            if right_w > 0:
+                split_vertical_first.append((x + panel_w + kerf, y, right_w, h))
         if panel_h < h:
-            rects.append((x, y + panel_h, panel_w, h - panel_h))
+            top_h = h - panel_h - kerf
+            if top_h > 0:
+                split_vertical_first.append((x, y + panel_h + kerf, panel_w, top_h))
+
+        split_horizontal_first = []
+        if panel_h < h:
+            top_h = h - panel_h - kerf
+            if top_h > 0:
+                split_horizontal_first.append((x, y + panel_h + kerf, w, top_h))
+        if panel_w < w:
+            right_w = w - panel_w - kerf
+            if right_w > 0:
+                split_horizontal_first.append((x + panel_w + kerf, y, right_w, panel_h))
+
+        chosen = self._choose_better_split(split_vertical_first, split_horizontal_first)
+        rects.extend(chosen)
+
+    def _choose_better_split(self, split_a: List[tuple], split_b: List[tuple]) -> List[tuple]:
+        """Choose the better guillotine split by remaining rectangle quality.
+
+        Preference order:
+        1) Larger largest-rectangle area
+        2) Larger second-largest area
+        3) Lower area difference (more balanced leftovers)
+        """
+        score_a = self._score_split(split_a)
+        score_b = self._score_split(split_b)
+        return split_a if score_a > score_b else split_b
+
+    def _score_split(self, split_rects: List[tuple]) -> tuple:
+        """Score split rectangles for quality comparisons."""
+        if not split_rects:
+            return (0.0, 0.0, 0.0)
+
+        areas = sorted((rw * rh for _, _, rw, rh in split_rects), reverse=True)
+        largest = areas[0]
+        second = areas[1] if len(areas) > 1 else 0.0
+        balance_penalty = abs(largest - second)
+        return (largest, second, -balance_penalty)
 
 
 class MaxRectAlgorithm(Packer):
